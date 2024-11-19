@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+progname=$(basename $0)
+
+OPTSTR=":r:f:d:uhv"
+
+echoerr() { echo "$@" 1>&2; }
+verbose() { if [[ -n $verbose ]]; then
+	      echo "$@" 1>&2;
+	    fi
+	  }
+
+usage() {
+  echo "$progname usage: [OPTIONS...] TARGET DESTINATION"
+  echo ""
+  echo "Arguments:"
+  echo "    TARGET            -- a file or directory to backup"
+  echo "    DESTINATION       -- a path, or ssh path (user@host:path)"
+  echo "                         The archive will be created in this location"
+  echo ""
+  echo "Options:"
+  echo "     -r key|keyfile   -- an ssh/age pub key file, or pub key string"
+  echo "                         The archive will be encrypted for this recipient"
+  echo "                         If not specified, will use the host ssh key in"
+  echo "                         '/etc/ssh/ssh_host_ed25519_key.pub'"
+  echo "     -f freq          -- the frequency of full snapshots, monthly(default), weekly, daily"
+  echo "     -d dir           -- the directory to track backup state, defaults to PWD"
+  echo "     -v               -- verbose output"
+  echo "     -u               -- unencrypted archive"
+  echo ""
+  echo "Environment Variables:"
+  echo "    BUB_SSH_OPTS      -- ssh cmdline args prepended to all ssh commands"
+  echo "                         eg. BUB_SSH_OPTS=\"-p 2222\" to specify an ssh server port"
+  echo "    BUB_TAR_OPTS      -- tar cmdline args prepended to tar commands"
+  echo "                         eg. BUB_TAR_OPTS=\"--exclude='*.bak'\" to exclude files matching a pattern"
+  exit 1;
+}
+
+unencrypted=""
+recipient=""
+frequency="monthly"
+ssh_opts=${BUB_SSH_OPTS:-""}
+tar_opts=${BUB_TAR_OPTS:-""}
+data_dir=${BUB_DATA_DIR:-$PWD}
+verbose=""
+
+[ $# -eq 0 ] && usage
+while getopts $OPTSTR o; do
+  case "${o}" in
+    --)
+      # No more options left.
+      break
+      ;;
+    r)
+      recipient="${OPTARG}"
+      ;;
+    f)
+      frequency="${OPTARG}"
+      ;;
+    v)
+      verbose="true"
+      ;;
+    d)
+      data_dir="${OPTARG}"
+      ;;
+    u)
+      unencrypted="true"
+      ;;
+    h | *)
+      usage
+      ;;
+  esac
+done
+
+shift $((OPTIND-1))
+
+
+target=${1:?target is required}
+destination=${2:?destination is required}
+
+destination_path=$(echo "$destination" | cut -s -d ':' -f 2)
+if [[ -z "$destination_path" ]]; then
+  destination_host=""
+  destination_path="$destination"
+else
+  destination_host=$(echo "$destination" | cut -s -d ':' -f 1)
+fi
+
+host_key="/etc/ssh/ssh_host_ed25519_key.pub"
+
+if [[ -z "$recipient" ]]; then
+  if [[ -r "$host_key" ]]; then
+    verbose "INFO: Using host ssh key at $host_key"
+    recipient=$host_key
+  else
+    echoerr "ERROR: Cannot read host key, a recipient must be specified"
+    exit 1
+  fi
+fi
+
+
+if [[ -z "$frequency" ]]; then
+   frequency="monthly"
+fi
+
+target_slug=$(realpath $target | sed 's/[/ ]/_/g' | sed 's/[_]//')
+
+case "$frequency" in
+  monthly)
+    snar_ts=$(date +%Y-%m)
+    ;;
+  weekly)
+    snar_ts=$(date +%Y-%V)
+    ;;
+  daily)
+    snar_ts=$(date +%Y-%m-%d)
+    ;;
+  *)
+    echoerr "ERROR: Unrecognized full dump frequency: $frequency"
+    exit 1
+    ;;
+esac
+
+target_snar=$(realpath "${data_dir}/${target_slug}-${snar_ts}.snar")
+working_snar="${target_snar}.working"
+
+
+if [[ -f $target_snar ]]; then
+  full="";
+else
+  full="yes";
+fi
+
+if [[ -f $working_snar ]]; then
+  echoerr "ERROR: A working snar file was found at ${working_snar}"
+  echoerr "ERROR: Another bub process may be working on this target."
+  exit 1
+fi
+
+
+if [[ -n $unencrypted ]]; then
+  encryption_ext=""
+else
+  encryption_ext=".age"
+fi
+
+host=$(hostname)
+
+if [[ -n $full ]]; then
+  archive_type="full"
+else
+  archive_type="incremental"
+fi
+
+archive_ts=$(date +%Y-%m-%dT%H%M%S)
+archive="${destination_path}/${host}-${target_slug}-${archive_ts}-${archive_type}.tar.zstd${encryption_ext}"
+
+cleanup_snar() {
+  trash="${target_snar}.working"
+  if [[ -f "${trash}" ]]; then
+    verbose "INFO: Cleaning up working snar archive, ${trash}";
+    rm ${trash}
+  fi
+}
+
+update_snar() {
+  verbose "INFO: Updating ${target_snar}"
+  mv "${target_snar}.working" ${target_snar}
+}
+
+
+tar_cmd() {
+  verbose "INFO: Will use ${target_snar} to track archive contents for incremental backups." ;
+
+  if [[ -f $target_snar ]]; then
+    working="${target_snar}.working"
+    verbose "INFO: Making working copy of snar at ${working}"
+    cp -p "$target_snar" "${working}"
+  fi
+
+
+  if [[ -n $full ]]; then
+    tar $tar_opts --zstd --create --level=0 --listed-incremental="${target_snar}.working" "$target";
+  else
+    tar $tar_opts --zstd --create --listed-incremental="${target_snar}".working "$target";
+  fi
+
+}
+
+age_cmd() {
+  if [[ -f $recipient ]]; then
+    age -R "$recipient";
+  else
+    age -r "$recipient";
+  fi
+}
+
+ssh_cmd() {
+  verbose "INFO: Backing up $target to ${destination_host}:${archive}";
+  ssh $ssh_opts "$destination_host" "mkdir -p $destination_path && (cat > ${archive}.working && mv ${archive}.working ${archive})";
+}
+
+local_cmd() {
+  verbose "INFO: Backing up $target to ${archive}";
+  mkdir -p "$destination_path" && cat > "${archive}.working" && mv "${archive}.working" "${archive}";
+}
+
+out_cmd() {
+  if [[ -z "$destination_host" ]]; then
+    local_cmd;
+  else
+    ssh_cmd;
+  fi
+}
+
+trap cleanup_snar EXIT
+
+if [[ -z "$unencrypted" ]]; then
+  ( tar_cmd | age_cmd | out_cmd ) && update_snar
+else
+  ( tar_cmd | out_cmd ) && update_snar
+fi
