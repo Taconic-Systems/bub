@@ -1,0 +1,10 @@
+[Unit]
+Description=Run bub backups
+Wants=bub.timer
+
+[Service]
+Type=oneshot
+ExecStart=/etc/bub/bub-nightly.sh
+
+[Install]
+WantedBy=multi-user.target
