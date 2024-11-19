@@ -32,10 +32,6 @@ Requirements:
 Using host ssh key at /etc/ssh/ssh_host_ed25519_key.pub
 Will use /home/craig/backups/home_craig_repositories-2024-11.snar to track archive contents for incremental backups.
 Backing up repositories to craig@silence:backups/garden-home_craig_repositories-full-2024-11-15T145634.tar.zstd.age
-Confirm user presence for key ED25519-SK SHA256:u1dKjM+B7cBvzfZO3Lrd5rLyLbGolsOyA8AmLHAc+lo
-Enter PIN for ED25519-SK key /home/craig/.ssh/craig_taconic_yk: 
-Confirm user presence for key ED25519-SK SHA256:u1dKjM+B7cBvzfZO3Lrd5rLyLbGolsOyA8AmLHAc+lo
-User presence confirmed
 Updating /home/craig/backups/home_craig_repositories-2024-11.snar
 #+end_example
 
