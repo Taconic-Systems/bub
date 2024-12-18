@@ -19,7 +19,8 @@ let
     isNormalUser = true;
     createHome = true;
     group = "bub";
-    #homeMode = "750";
+    homeMode = "750";
+    shell = "${pkgs.bub}/bin/bub-store";
     home = "${cfg.incomingDir}/${username}";
     description = "${userConfig.description}";
     openssh.authorizedKeys.keys = userConfig.keys;
@@ -33,8 +34,9 @@ let
       PermitTTY no
       PermitTunnel no
       X11Forwarding no
-      ForceCommand ${pkgs.bub}/bin/bub-store
   '') cfg.users;
+  #        ForceCommand ${pkgs.bub}/bin/bub-store
+
 in
 {
 

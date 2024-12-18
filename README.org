@@ -2,7 +2,9 @@ A simple, resilient and secure backup script, =bub=, which produces =age=
 encrypted =tar= archives, and can save them locally or stream them via
 ssh to a remote host.
 
-A server side script, =bub-store=, is provided, which can be set as the openssh =ForceCommand= for the user, and restrict them to only uploading archives.
+A server side script, =bub-store=, is also provided, which can be set
+as the openssh =ForceCommand= for the user, and restrict them to only
+uploading archives.
 
 The ideal use case is off-host backup up discrete data sets, where the
 collecting server handles replication offsite and long-term storage.

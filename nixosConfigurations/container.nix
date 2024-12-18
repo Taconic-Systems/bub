@@ -25,6 +25,7 @@
   users.users."ssh-test" = {
     isNormalUser = true;
     createHome = true;
+    shell = "${pkgs.bub}/bin/bub-store";
     description = "SSH Test User";
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGKzfbkXCGcp4FU1sVyFg609XbEFbCK/Wba2XlomYlJo craig@garden"
