@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-progname=$(basename $0)
+#progname=$(basename $0)
+progname="bub"
 
 OPTSTR=":r:f:d:uhv"
 
@@ -12,11 +13,13 @@ verbose() { if [[ -n $verbose ]]; then
 	  }
 
 usage() {
-  echo "$progname usage: [OPTIONS...] TARGET DESTINATION"
+  echo "$progname usage: [OPTIONS...]  SOURCE DESTINATION"
   echo ""
   echo "Arguments:"
-  echo "    TARGET            -- a file or directory to backup"
-  echo "    DESTINATION       -- a path, or ssh path (user@host:path)"
+  echo "    SOURCE            -- a file or directory to backup"
+  echo "    DESTINATION       -- a path"
+  echo "                         or ssh path (ssh://user@host:path)"
+  echo "                         or bub path (bub://user@host)"
   echo "                         The archive will be created in this location"
   echo ""
   echo "Options:"
@@ -75,16 +78,33 @@ done
 
 shift $((OPTIND-1))
 
-
-target=${1:?target is required}
+source=${1:?source is required}
 destination=${2:?destination is required}
 
-destination_path=$(echo "$destination" | cut -s -d ':' -f 2)
-if [[ -z "$destination_path" ]]; then
-  destination_host=""
-  destination_path="$destination"
+readonly URI_REGEX='^(([^:/?#]+):)?(//((([^:/?#]+)@)?([^:/?#]+)(:([0-9]+))?))?((/|$)([^?#]*))(\?([^#]*))?(#(.*))?$'
+
+if [[ $destination =~ $URI_REGEX ]]; then
+  destination_scheme=${BASH_REMATCH[2]}
+  destination_user=${BASH_REMATCH[6]}
+  destination_host=${BASH_REMATCH[7]}
+  destination_port=${BASH_REMATCH[9]}
+  destination_path=${BASH_REMATCH[10]}
 else
-  destination_host=$(echo "$destination" | cut -s -d ':' -f 1)
+  destination_scheme="file"
+  destination_path="$destination"
+fi
+
+if [[ $destination_scheme = "bub" ]]; then
+  if [[ -n $destination_path ]]; then
+    echoerr "ERROR: cannot specify path for bub store"
+    exit 1
+  fi
+elif [[ $destination_scheme = "ssh" ]]; then
+  if [[ -n $destination_path ]]; then
+    destination_path=$(echo "$destination_path" | sed 's/^\///')
+  fi
+elif [[ ! $destination_scheme = "file" ]]; then
+  echoerr "ERROR: unknown URL scheme for target"
 fi
 
 host_key="/etc/ssh/ssh_host_ed25519_key.pub"
@@ -104,7 +124,7 @@ if [[ -z "$frequency" ]]; then
    frequency="monthly"
 fi
 
-target_slug=$(realpath $target | sed 's/[/ ]/_/g' | sed 's/[_]//')
+source_slug=$(realpath $source | sed 's/[/ ]/_/g' | sed 's/[_]//')
 
 case "$frequency" in
   monthly)
@@ -122,11 +142,11 @@ case "$frequency" in
     ;;
 esac
 
-target_snar=$(realpath "${data_dir}/${target_slug}-${snar_ts}.snar")
-working_snar="${target_snar}.working"
+source_snar=$(realpath "${data_dir}/${source_slug}-${snar_ts}.snar")
+working_snar="${source_snar}.working"
 
 
-if [[ -f $target_snar ]]; then
+if [[ -f $source_snar ]]; then
   full="";
 else
   full="yes";
@@ -134,7 +154,7 @@ fi
 
 if [[ -f $working_snar ]]; then
   echoerr "ERROR: A working snar file was found at ${working_snar}"
-  echoerr "ERROR: Another bub process may be working on this target."
+  echoerr "ERROR: Another bub process may be working on this source."
   exit 1
 fi
 
@@ -154,36 +174,41 @@ else
 fi
 
 archive_ts=$(date +%Y-%m-%dT%H%M%S)
-archive="${destination_path}/${host}-${target_slug}-${archive_ts}-${archive_type}.tar.zstd${encryption_ext}"
+archive_base="${host}-${source_slug}-${archive_ts}-${archive_type}.tar.zstd${encryption_ext}"
+if [[ -n "$destination_path" ]]; then
+  archive="${destination_path}/${archive_base}"
+else
+  archive="${archive_base}"
+fi
 
 cleanup_snar() {
-  trash="${target_snar}.working"
+  trash="${source_snar}.working"
   if [[ -f "${trash}" ]]; then
     verbose "INFO: Cleaning up working snar archive, ${trash}";
-    rm ${trash}
+    rm "${trash}"
   fi
 }
 
 update_snar() {
-  verbose "INFO: Updating ${target_snar}"
-  mv "${target_snar}.working" ${target_snar}
+  verbose "INFO: Updating ${source_snar}"
+  mv "${source_snar}.working" "${source_snar}"
 }
 
 
 tar_cmd() {
-  verbose "INFO: Will use ${target_snar} to track archive contents for incremental backups." ;
+  verbose "INFO: Will use ${source_snar} to track archive contents for incremental backups." ;
 
-  if [[ -f $target_snar ]]; then
-    working="${target_snar}.working"
+  if [[ -f $source_snar ]]; then
+    working="${source_snar}.working"
     verbose "INFO: Making working copy of snar at ${working}"
-    cp -p "$target_snar" "${working}"
+    cp -p "$source_snar" "${working}"
   fi
 
 
   if [[ -n $full ]]; then
-    tar $tar_opts --zstd --create --level=0 --listed-incremental="${target_snar}.working" "$target";
+    tar $tar_opts --zstd --create --level=0 --listed-incremental="${source_snar}.working" "$source";
   else
-    tar $tar_opts --zstd --create --listed-incremental="${target_snar}".working "$target";
+    tar $tar_opts --zstd --create --listed-incremental="${source_snar}".working "$source";
   fi
 
 }
@@ -196,21 +221,42 @@ age_cmd() {
   fi
 }
 
+if [[ -n $destination_user ]]; then
+  ssh_spec="$destination_user@$destination_host"
+else
+  ssh_spec="$destination_host"
+fi
+
 ssh_cmd() {
-  verbose "INFO: Backing up $target to ${destination_host}:${archive}";
-  ssh $ssh_opts "$destination_host" "mkdir -p $destination_path && (cat > ${archive}.working && mv ${archive}.working ${archive})";
+    verbose "INFO: Backing up $source to ${destination_scheme}://${ssh_spec}/${archive}";
+  if [[ -n $destination_path ]]; then
+    ssh -T $ssh_opts "$ssh_spec" "mkdir -p $destination_path && (cat > ${archive}.working && mv ${archive}.working ${archive})";
+  else
+    ssh -T $ssh_opts "$ssh_spec" "(cat > ${archive}.working && mv ${archive}.working ${archive})";
+  fi
+}
+
+bub_cmd() {
+  archive=$(echo "$archive" | sed 's/^\///')
+  verbose "INFO: Backing up $source to ${destination_scheme}://${ssh_spec}/${archive}";
+  cmdfile=$(mktemp)
+  trap "rm -f $cmdfile" RETURN
+  echo "upload $archive" > "${cmdfile}"
+  cat "${cmdfile}" - | ssh -T $ssh_opts "$ssh_spec";
 }
 
 local_cmd() {
-  verbose "INFO: Backing up $target to ${archive}";
+  verbose "INFO: Backing up $source to ${archive}";
   mkdir -p "$destination_path" && cat > "${archive}.working" && mv "${archive}.working" "${archive}";
 }
 
 out_cmd() {
-  if [[ -z "$destination_host" ]]; then
+  if [[ "$destination_scheme" = "file" ]]; then
     local_cmd;
-  else
+  elif [[ "$destination_scheme" = "ssh" ]]; then
     ssh_cmd;
+  elif [[ "$destination_scheme" = "bub" ]]; then
+    bub_cmd;
   fi
 }
 

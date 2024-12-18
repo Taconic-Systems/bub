@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+progname=$(basename "$0")
+
+OPTSTR=":d:h"
+
+echoerr() { echo "$@" 1>&2; }
+
+
+usage() {
+  echo "$progname usage: [OPTIONS...]"
+  echo ""
+  echo "Options:"
+  echo "     -d dir           -- the directory to store archives in, defaults to PWD"
+  exit 1;
+}
+
+archive_dir=${PWD}
+
+while getopts $OPTSTR o; do
+  case "${o}" in
+    --)
+      # No more options left.
+      break
+      ;;
+    d)
+      archive_dir="${OPTARG}"
+      ;;
+    h | *)
+      usage
+      ;;
+  esac
+done
+
+
+shift $((OPTIND-1))
+
+cd "$archive_dir"
+
+# enter restricted mode
+set -r
+# first line is the archive to be uploaded
+# cannot have path separators in it.
+read -r cmd;
+
+readonly UPLOAD_REGEX='^(\w+)\s(.*)?$'
+
+cleanup_working() {
+  trash="${archive}.working"
+  if [[ -f "${trash}" ]]; then
+    echoerr "INFO: Cleaning up working archive, ${trash}";
+    rm ${trash}
+  fi
+}
+
+
+if [[ $cmd =~ $UPLOAD_REGEX ]]; then
+  action=${BASH_REMATCH[1]}
+  if [[ $action = "upload" ]]; then
+     archive=${BASH_REMATCH[2]}
+     #echoerr "begin uploading $archive"
+     if [[ "$archive" =~ / ]]; then
+       echoerr "No path separators allowed in archive name"
+       exit 1
+     fi
+     # cannot overwrite archives or working copies
+     if [[ -f "$archive" ]]; then
+       echoerr "Cannot overwrite archive: $archive";
+       exit 1
+     fi
+
+     wf="$archive.working"
+
+
+     if [[ -f "$wf" ]]; then
+       echoerr "Cannot overwrite working archive: $wf";
+       exit 1
+     else
+       trap cleanup_working EXIT
+       cp /dev/stdin "$wf"
+       mv -n "$wf" "$archive"
+     fi
+     exit 0
+  else
+    echoerr "ERROR: Unrecognized action: $action"
+    exit 1
+  fi
+else
+  echoerr "ERROR: Unrecognized command: $cmd"
+  exit 1
+fi

@@ -1,6 +1,8 @@
-A simple, resilient and secure backup script, which produces =age=
+A simple, resilient and secure backup script, =bub=, which produces =age=
 encrypted =tar= archives, and can save them locally or stream them via
 ssh to a remote host.
+
+A server side script, =bub-store=, is provided, which can be set as the openssh =ForceCommand= for the user, and restrict them to only uploading archives.
 
 The ideal use case is off-host backup up discrete data sets, where the
 collecting server handles replication offsite and long-term storage.
@@ -19,16 +21,21 @@ Design Goals:
   - replication outside of trust boundary/offline
   - compromised hosts cannot modify their backups
 
-Requirements:
+Client Requirements:
 
 - [[https://github.com/FiloSottile/age][age]]
 - gnu tar
 - ssh
 
+Server Requirements:
+
+- bash
+- openssh  
+
 * How it works
 
 #+begin_example
-❯ bub -v -d backups repositories craig@silence:backups
+❯ bub -v -d backups repositories ssh://craig@silence/backups
 Using host ssh key at /etc/ssh/ssh_host_ed25519_key.pub
 Will use /home/craig/backups/home_craig_repositories-2024-11.snar to track archive contents for incremental backups.
 Backing up repositories to craig@silence:backups/garden-home_craig_repositories-full-2024-11-15T145634.tar.zstd.age
@@ -126,11 +133,11 @@ location where the client cannot modify or delete them.  They can also be replic
 #+begin_src shell
 #/usr/bin/env bash
 # where clients put new archives
-ARCHIVE_DIR="/home/bub/archives"
+ARCHIVE_DIR="/var/bub/archives"
 # where we want to replicate
 REPLICA_DIR="/var/bub/replica"
 
-cp -Pn "$ARCHIVE_DIR/*.tar.zstd.age" "$REPLICA_DIR"
+cp -Pn "$ARCHIVE_DIR/*/*.tar.zstd.age" "$REPLICA_DIR"
 
 done
 #+end_src
