@@ -45,8 +45,8 @@
           };
         in
         {
-          bub = pkgs.${system}.bub;
-          default = pkgs.${system}.bub;
+          bub = pkgs.bub;
+          default = pkgs.bub;
         }
       );
 

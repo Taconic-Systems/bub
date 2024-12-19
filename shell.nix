@@ -4,6 +4,7 @@
 pkgs.mkShell {
   # nativeBuildInputs is usually what you want -- tools you need to run
   nativeBuildInputs = with pkgs; [
+    pkgs.bash
     pkgs.age
     pkgs.gnutar
     pkgs.openssh

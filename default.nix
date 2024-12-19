@@ -27,6 +27,7 @@ stdenv.mkDerivation {
   nativeBuildInputs = [
     makeWrapper
   ];
+  dontBuild = true;
   installPhase = ''
     mkdir -p $out/bin
     cp -a bub $out/bin
