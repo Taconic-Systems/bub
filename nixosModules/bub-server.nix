@@ -1,7 +1,7 @@
 {
   config,
-  pkgs,
   lib,
+  pkgs,
   ...
 }:
 let
@@ -10,8 +10,6 @@ let
     mkOption
     mkIf
     types
-    submodule
-    listOf
     ;
   cfg = config.services.bub-server;
   bubUsers = lib.mapAttrs (username: userConfig: {

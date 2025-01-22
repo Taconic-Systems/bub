@@ -28,12 +28,9 @@
       };
 
       nixosModules = {
-        bub-server = import ./nixosModules/bub-server.nix {
-          nixpkgs.overlays = overlayList;
-        };
+        bub-server = import ./nixosModules/bub-server.nix;
         default = self.nixosModules.bub-server;
       };
-
       # Your custom packages
       # Acessible through 'nix build', 'nix shell', etc
       packages = forAllSystems (
